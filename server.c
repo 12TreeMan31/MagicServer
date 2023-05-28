@@ -9,8 +9,6 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 #include <errno.h>       
-
-//#include <cjson/cJSON.h>
 #include <regex.h>
 
 void panic(const char *message) { perror(message); exit(0); };
@@ -21,10 +19,10 @@ struct Client
 {
     int fd;
 
-    char *publicEndpoint;
+    char *publicIp;
     int publicPort;
 
-    char *privateEndpoint;
+    char *privateIp;
     int privatePort;
 };
 
@@ -35,14 +33,14 @@ struct Room
     struct Client clientB;
 };
 
-
 int main(int argc, char *argv[])
 {
     //Args
     int port = -1;
     if (argc > 1)
     {
-        if (port = atoi(argv[1]) < 0) 
+        port = atoi(argv[1]);
+        if (port < 0)
         {
             panic("Please enter a valid port");
         }
@@ -84,11 +82,15 @@ int main(int argc, char *argv[])
     fd_set sdArray;
 
     int newClient;
-    int totalClients = 0;
+    //int totalClients = 0;
     int maxClients = 1024;
     int activeClients[maxClients];
     memset(&activeClients, 0, sizeof(activeClients));
 
+    //Some more client stuff
+    struct Room **clientList = (struct Room **)calloc(100, sizeof(struct Room));
+    int roomListIndex = 0;
+    int yesRoom = 0;
 
     bool running = true;
     while (running)
@@ -170,61 +172,67 @@ int main(int argc, char *argv[])
                 //Manage it
                 if ((sd = activeClients[i]) > 0)
                 {
-                    //Get the response from client A
-                    char buffer[1024], buffer2[1024];
-                    read(sd, buffer, sizeof(buffer));
+                    //Read response from client
+                    //char buffer[1024], buffer2[1024], buffer3[1024], buffer4[1024];
+                    char *buffer;
+                    buffer = (char*)calloc(9999, sizeof(char));
+
+                    read(sd, buffer, 9999);
                     printf("%s\n", buffer);
                     
-                    strcpy(buffer2, buffer);
-                    //Parse the message for clients ip and port and the room ID
-                    int port, roomNum;
-                    char ip[255];
+                    //Parse the request
+                    char* token = strtok(buffer, "-");
                     
-                    regex_t getIp, getPort;
-                    regcomp(&getIp, "-.*-", 0);
-                    regcomp(&getPort, "|.*|", 0);
-
-                    regexec(&getIp, buffer, 0, NULL, 0);
-                    regexec(&getPort, buffer2, 0, NULL, 0);
-                    //Add A's public and private endpoint to a Room?
-                    char NewRoom;
-                    scanf("New room?: %c", NewRoom);
-                    if (NewRoom == 'Y') 
+                    //Checks room
+                    switch (*token)
                     {
-                        static struct Room potat;
-                        potat.clientA.privateEndpoint = buffer;
-                        potat.clientA.privatePort = port;
+                        case 'J':
+                            struct Room *someNewRoom = (struct Room*)malloc(sizeof(struct Room));
+                            clientList[roomListIndex] = someNewRoom;
+
+                            //FD
+                            clientList[roomListIndex]->clientA.fd = sd;
+
+                            //Ip
+                            token = strtok(NULL, "-");
+                            clientList[roomListIndex]->clientA.privateIp = token;
+
+                            //Port
+                            token = strtok(NULL, "-");
+                            clientList[roomListIndex]->clientA.privatePort = atoi(token); 
+                            printf("Created room!\n");
+                            break;
+                        case 'N':
+                            yesRoom = 1;
+                            clientList[roomListIndex]->clientB.fd = sd;
+
+                            //Ip
+                            token = strtok(NULL, "-");
+                            clientList[roomListIndex]->clientB.privateIp = token;
+
+                            //Port
+                            token = strtok(NULL, "-");
+                            clientList[roomListIndex]->clientB.privatePort = atoi(token); 
+
+                            snprintf(buffer, 9999, "%s, %i", clientList[roomListIndex]->clientA.privateIp, clientList[roomListIndex]->clientA.privatePort);
+                            //Send messages to client B
+                            write(sd, buffer, 9999);
+                            break;
                     }
-                    else
+
+                    //Stores fd and request in a struct
+                    if (yesRoom == 1 && clientList[roomListIndex]->clientA.fd == sd)
                     {
-                        
-                    } 
+                            snprintf(buffer, 9999, "%s, %i", clientList[roomListIndex]->clientB.privateIp, clientList[roomListIndex]->clientB.privatePort);
+                            //Send messages to client B
+                            write(sd, buffer, 9999); 
+                    }
+                    //Does stuff if client wants to join or create a room
 
-                    //Tell A everything went ok and that it needs to wait for B
-                    //We get B in the next loop
-                    char *message = "HTTP/1.1 200 OK\r\n";
-                    write(sd, message, strlen(message));
+                    //Does nothing untill there are 2 clients which it then sends the endpoints
 
-                    //If we have 2 clients then send the private and public endpoints
-
-
-
-
-
-
-
-                    /*regex_t reegex;
-                    regcomp(&reegex, "{.*", 0);
-
-                    regexec(&reegex, message, 0, NULL, 0);
-
-                    cJSON *monitor = cJSON_CreateObject();
-                    monitor = cJSON_Parse(message);
-
-                    char *string = cJSON_Print(monitor);
-
-                    printf("%s", string);*/
-                    //regcomp(&reegex, "");
+                    //End communication
+                    free(buffer);
                 }
             }
         }     

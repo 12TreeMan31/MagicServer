@@ -11,59 +11,66 @@
 #include <unistd.h>
 #include <errno.h>
 
-void panic(const char *message) { perror(("%s\n", message)); exit(0); };
+#include <regex.h>
+
+void panic(const char *message) { perror((message)); exit(0); };
 void error(const char *message) { printf("%s\n", message); exit(0); };
 void warning(const char *message) { printf("%s\n", message); };
 
-void buildRequest(char *buf, int port)
-{ 
-    //Gets host infomation
-    char hostNameBuf[256];
-    char *ipInfo;
-    struct hostent *hostInfo;
 
-    gethostname(hostNameBuf, sizeof(hostNameBuf));
-    hostInfo = gethostbyname(hostNameBuf);                        //DEPRECATED
-
-    //This converts the ip address in ASCII so this is only for debugging //TODO
-    ipInfo = inet_ntoa(*((struct in_addr*)hostInfo->h_addr_list[0]));
-
-    //Creates the HTTP request
-
-    //Sets up the JSON
-    char json[512];
-    snprintf(json, sizeof(json), 
-    "{"
-        "\"PrivateIP\": \"%s\","
-        "\"PrivatePort\": \"%i\""
-    "}", ipInfo, port);
-
-    //The Request itsself
-    char message[1024];
-    snprintf(message, sizeof(message),
-    "POST / HTTP/1.1\r\n"
-    "Content-Type: application/json\r\n"
-    "Content-Length: %li\r\n"
-    "\r\n", strlen(json));
-
-    strcat(message, json);
-    strcpy(buf, message);
-}
-
-void getHostInfo(char *buf)
+//Gets the ip that the client is using th connect to server
+char* getHostInfo()
 {
     //Gets host infomation
     char hostNameBuf[256];
-    char *ipInfo;
     struct hostent *hostInfo;
 
     gethostname(hostNameBuf, sizeof(hostNameBuf));
     hostInfo = gethostbyname(hostNameBuf);                        //DEPRECATED
 
-    //This converts the ip address in ASCII so this is only for debugging //TODO
-    ipInfo = inet_ntoa(*((struct in_addr*)hostInfo->h_addr_list[0]));
-    strcpy(buf, ipInfo);
+    //This converts the ip address to ASCII
+    return (inet_ntoa(*((struct in_addr*)hostInfo->h_addr_list[0])));
+    //printf("%s", ipInfo);
 }
+
+void attemptConnection(int *clientSocket, struct sockaddr_in serverInfo)
+{
+    int connectionState;
+    do
+    {
+        connectionState = connect(*clientSocket, (struct sockaddr*)&serverInfo, sizeof(serverInfo));
+    } while (connectionState == -1);
+}
+
+void initP2Pconnection()
+{
+    //Creates the response
+    scanf("Room ID: %i", &roomID);
+    ipInfo = getHostInfo();
+    snprintf(messageBuffer, sizeof(messageBuffer),
+        "J-%s-%i-%i",ipInfo, port, 123);
+
+    //Starts talking to the server to make the connection happen
+    write(clientSocket, messageBuffer, strlen(messageBuffer));
+    printf("Sent connection request %s\n", messageBuffer);
+    memset(messageBuffer, 0, sizeof(messageBuffer));
+
+    //Gets respanse back with another clients ip's and port's
+    read(clientSocket, messageBuffer, sizeof(messageBuffer));
+    printf("Starting connection to client\n");
+    //Creates more buffers so message can be parsed with regex
+    strcpy(tempBuffer, messageBuffer);
+    regexec(&readMessageIP, messageBuffer, 0, NULL, 0);
+    regexec(&readMessagePort, tempBuffer, 0, NULL, 0);
+    printf("Port: %s\n", tempBuffer);
+    printf("IP: %s\n", messageBuffer);
+    //Rebinds the active socket other client
+    serverInfo.sin_port = htons(atoi(tempBuffer));
+    inet_aton(messageBuffer, &serverInfo.sin_addr);
+    //Trys to connect to the other client
+    connect(clientSocket, (struct sockaddr*)&serverInfo, sizeof(serverInfo));
+}
+
 
 int main(int argc, char *argv[])
 {
@@ -96,44 +103,91 @@ int main(int argc, char *argv[])
 
     printf("Looking for server...\n");
 
-    int connectionState;
-    do
-    {
-        connectionState = connect(clientSocket, (struct sockaddr*)&serverInfo, sizeof(serverInfo));
-    } while (connectionState == -1);
+    attemptConnection(&clientSocket, serverInfo);
 
     printf("Server found!\n");
 
-    
-    //This makes a HTTP request
-    char buf[5000];
-    //buildRequest(buf, port);                    //REMOVE LATER
-    getHostInfo(buf);
+    char messageBuffer[2048];
+    char userInput, *ipInfo;
+    int roomID;
 
-    char msg[9999];
-    snprintf(msg, sizeof(msg),
-        "-%s-|%i|", buf, port
-    );
-
-    printf("%s\n------------------\n", buf);
-
-    //Starts the conversation
-    write(clientSocket, msg, strlen(msg));
-    
-    memset(buf, 0, sizeof(buf));
-    read(clientSocket, buf, sizeof(buf));
-
-    printf("%s\n", buf);
+    regex_t readMessageIP, readMessagePort;
+    regcomp(&readMessageIP, ":.*:", 0);
+    regcomp(&readMessagePort, "|.*|", 0);
 
     bool running = true;
-    while (running)
+    while (running) 
     {
-        memset(buf, 0, sizeof(buf));
-        read(clientSocket, buf, sizeof(buf));
+        //Clears buffers
+        memset(messageBuffer, 0, sizeof(messageBuffer));
+        //
+        char tempBuffer[1024];
+        printf("> ");
+        scanf("%c", &userInput);
+        switch (userInput)
+        {
+            case 'j':   //Join a room
+                //Creates the response
+                scanf("Room ID: %i", &roomID);
+                ipInfo = getHostInfo();
+                snprintf(messageBuffer, sizeof(messageBuffer),
+                    "J-%s-%i-%i",ipInfo, port, 123);
+
+                //Starts talking to the server to make the connection happen
+                write(clientSocket, messageBuffer, strlen(messageBuffer));
+                printf("Sent connection request %s\n", messageBuffer);
+                memset(messageBuffer, 0, sizeof(messageBuffer));
+
+                //Gets respanse back with another clients ip's and port's
+                read(clientSocket, messageBuffer, sizeof(messageBuffer));
+                printf("Starting connection to client\n");
+                //Creates more buffers so message can be parsed with regex
+                strcpy(tempBuffer, messageBuffer);
+                regexec(&readMessageIP, messageBuffer, 0, NULL, 0);
+                regexec(&readMessagePort, tempBuffer, 0, NULL, 0);
+                printf("Port: %s\n", tempBuffer);
+                printf("IP: %s\n", messageBuffer);
+                //Rebinds the active socket other client
+                serverInfo.sin_port = htons(atoi(tempBuffer));
+                inet_aton(messageBuffer, &serverInfo.sin_addr);
+                //Trys to connect to the other client
+                connect(clientSocket, (struct sockaddr*)&serverInfo, sizeof(serverInfo));
+                break;
+            case 'n':   //Create a new room
+                //Creates the response
+                scanf("Room ID: %i", &roomID);
+                ipInfo = getHostInfo();
+                snprintf(messageBuffer, sizeof(messageBuffer),
+                    "N-%s-%i-%i",ipInfo, port, 123);
+
+                //Starts talking to the server to make the connection happen
+                write(clientSocket, messageBuffer, strlen(messageBuffer));
+                printf("Sent connection request %s\n", messageBuffer);
+                memset(messageBuffer, 0, sizeof(messageBuffer));
+
+                //Gets respanse back with another clients ip's and port's
+                read(clientSocket, messageBuffer, sizeof(messageBuffer));
+                printf("Starting connection to client\n");
+                //Creates more buffers so message can be parsed with regex
+                strcpy(tempBuffer, messageBuffer);
+                regexec(&readMessageIP, messageBuffer, 0, NULL, 0);
+                regexec(&readMessagePort, tempBuffer, 0, NULL, 0);
+                printf("Port: %s\n", tempBuffer);
+                printf("IP: %s\n", messageBuffer);
+                //Rebinds the active socket other client
+                serverInfo.sin_port = htons(atoi(tempBuffer));
+                inet_aton(messageBuffer, &serverInfo.sin_addr);
+                //Trys to connect to the other client
+                connect(clientSocket, (struct sockaddr*)&serverInfo, sizeof(serverInfo));
+                break;
+            case 'q':   //Quits
+                close(clientSocket);
+                shutdown(clientSocket, SHUT_RDWR);
+                break;
+            default:
+                printf("%c", userInput);
+                break;
+        }
     }
-
-    close(clientSocket);
-    shutdown(clientSocket, SHUT_RDWR);
-
     return 0;
 }
