@@ -50,6 +50,21 @@ void buildRequest(char *buf, int port)
     strcpy(buf, message);
 }
 
+void getHostInfo(char *buf)
+{
+    //Gets host infomation
+    char hostNameBuf[256];
+    char *ipInfo;
+    struct hostent *hostInfo;
+
+    gethostname(hostNameBuf, sizeof(hostNameBuf));
+    hostInfo = gethostbyname(hostNameBuf);                        //DEPRECATED
+
+    //This converts the ip address in ASCII so this is only for debugging //TODO
+    ipInfo = inet_ntoa(*((struct in_addr*)hostInfo->h_addr_list[0]));
+    strcpy(buf, ipInfo);
+}
+
 int main(int argc, char *argv[])
 {
     int port = -1;
@@ -89,13 +104,21 @@ int main(int argc, char *argv[])
 
     printf("Server found!\n");
 
+    
+    //This makes a HTTP request
+    char buf[5000];
+    //buildRequest(buf, port);                    //REMOVE LATER
+    getHostInfo(buf);
 
-    char buf[9999];
-    buildRequest(buf, port);
+    char msg[9999];
+    snprintf(msg, sizeof(msg),
+        "-%s-|%i|", buf, port
+    );
+
     printf("%s\n------------------\n", buf);
 
     //Starts the conversation
-    write(clientSocket, buf, strlen(buf));
+    write(clientSocket, msg, strlen(msg));
     
     memset(buf, 0, sizeof(buf));
     read(clientSocket, buf, sizeof(buf));

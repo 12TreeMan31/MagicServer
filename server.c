@@ -10,21 +10,31 @@
 #include <unistd.h>
 #include <errno.h>       
 
-#include <cjson/cJSON.h>
+//#include <cjson/cJSON.h>
+#include <regex.h>
 
 void panic(const char *message) { perror(message); exit(0); };
 void error(const char *message) { printf("%s", message); exit(0); };
-void warning(const char *message) { printf("%s", *message); };
+void warning(const char *message) { printf("%s", message); };
+
+struct Client
+{
+    int fd;
+
+    char *publicEndpoint;
+    int publicPort;
+
+    char *privateEndpoint;
+    int privatePort;
+};
 
 struct Room
 {
     int roomID;
-    struct in_addr clientA_Public;
-    struct in_addr clientA_Private;
-
-    struct in_addr clientB_Public;
-    struct in_addr clientB_Private;
+    struct Client clientA;
+    struct Client clientB;
 };
+
 
 int main(int argc, char *argv[])
 {
@@ -32,8 +42,7 @@ int main(int argc, char *argv[])
     int port = -1;
     if (argc > 1)
     {
-        port = atoi(argv[1]);
-        if (port < 0)
+        if (port = atoi(argv[1]) < 0) 
         {
             panic("Please enter a valid port");
         }
@@ -161,12 +170,61 @@ int main(int argc, char *argv[])
                 //Manage it
                 if ((sd = activeClients[i]) > 0)
                 {
-                    char buffer[1024];
+                    //Get the response from client A
+                    char buffer[1024], buffer2[1024];
                     read(sd, buffer, sizeof(buffer));
                     printf("%s\n", buffer);
+                    
+                    strcpy(buffer2, buffer);
+                    //Parse the message for clients ip and port and the room ID
+                    int port, roomNum;
+                    char ip[255];
+                    
+                    regex_t getIp, getPort;
+                    regcomp(&getIp, "-.*-", 0);
+                    regcomp(&getPort, "|.*|", 0);
 
+                    regexec(&getIp, buffer, 0, NULL, 0);
+                    regexec(&getPort, buffer2, 0, NULL, 0);
+                    //Add A's public and private endpoint to a Room?
+                    char NewRoom;
+                    scanf("New room?: %c", NewRoom);
+                    if (NewRoom == 'Y') 
+                    {
+                        static struct Room potat;
+                        potat.clientA.privateEndpoint = buffer;
+                        potat.clientA.privatePort = port;
+                    }
+                    else
+                    {
+                        
+                    } 
+
+                    //Tell A everything went ok and that it needs to wait for B
+                    //We get B in the next loop
                     char *message = "HTTP/1.1 200 OK\r\n";
                     write(sd, message, strlen(message));
+
+                    //If we have 2 clients then send the private and public endpoints
+
+
+
+
+
+
+
+                    /*regex_t reegex;
+                    regcomp(&reegex, "{.*", 0);
+
+                    regexec(&reegex, message, 0, NULL, 0);
+
+                    cJSON *monitor = cJSON_CreateObject();
+                    monitor = cJSON_Parse(message);
+
+                    char *string = cJSON_Print(monitor);
+
+                    printf("%s", string);*/
+                    //regcomp(&reegex, "");
                 }
             }
         }     
