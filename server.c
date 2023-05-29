@@ -197,6 +197,10 @@ int main(int argc, char *argv[])
                 {
                     case 'N':   //Create a room
                         struct Room *newHotelRoom; 
+                        //Why Debain?
+                        goto Clean;
+                        Clean: ;
+                        
                         newHotelRoom = malloc(sizeof(*newHotelRoom));
                         activeClients[i].waiting = true;
                         newHotelRoom->clientA = activeClients[i];
