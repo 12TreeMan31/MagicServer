@@ -196,7 +196,8 @@ int main(int argc, char *argv[])
                 switch (*token)
                 {
                     case 'N':   //Create a room
-                        struct Room *newHotelRoom = malloc(sizeof(*newHotelRoom));
+                        struct Room *newHotelRoom; 
+                        newHotelRoom = malloc(sizeof(*newHotelRoom));
                         activeClients[i].waiting = true;
                         newHotelRoom->clientA = activeClients[i];
 
