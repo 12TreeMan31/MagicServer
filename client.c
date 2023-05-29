@@ -109,6 +109,7 @@ int main(int argc, char *argv[])
     serverInfo.sin_family = AF_INET;
     serverInfo.sin_port = htons(port);
     serverInfo.sin_addr.s_addr = htonl(0x7F000001);
+    inet_aton("98.226.56.248", &serverInfo.sin_addr);
 
     //Configures socket options 
     int opt = true;  
