@@ -200,7 +200,7 @@ int main(int argc, char *argv[])
                         //Why Debain?
                         goto Clean;
                         Clean: ;
-                        
+
                         newHotelRoom = malloc(sizeof(*newHotelRoom));
                         activeClients[i].waiting = true;
                         newHotelRoom->clientA = activeClients[i];
@@ -247,7 +247,7 @@ int main(int argc, char *argv[])
                         snprintf(buffer, 9999, "%s-%i-%s-%i", activeRoom.clientB.privateIp, activeRoom.clientB.privatePort, 
                             activeRoom.clientB.publicIp, activeRoom.clientB.publicPort);
                         //Sends message
-                        write(activeRoom.clientB.fd, buffer, 9999);
+                        write(activeRoom.clientA.fd, buffer, 9999);
                         memset(buffer, 0, 9999);
                         
                         printf("Sent message to client A\n");

@@ -70,16 +70,22 @@ void initP2Pconnection(int *clientSocket, struct sockaddr_in serverInfo, char ro
     //IP
     token = strtok(messageBuffer, "-");
     inet_aton(token, &serverInfo.sin_addr);
-    printf("IP: %s\n", token);
+    printf("Private IP: %s\n", token);
     //Port
     token = strtok(NULL, "-");
     serverInfo.sin_port = htons(atoi(token));
-    printf("Port: %s\n", token);
+    printf("Private Port: %s\n", token);
 
     //Public
+    //IP
     token = strtok(NULL, "-");
-    
+    inet_aton(token, &serverInfo.sin_addr);
+    printf("Public IP: %s\n", token);
+
+    //Port
     token = strtok(NULL, "-");
+    serverInfo.sin_port = htons(atoi(token));
+    printf("Public Port: %s\n", token);
 
     //Trys to connect to the other client
     printf("Waiting on client...\n");
@@ -135,6 +141,8 @@ int main(int argc, char *argv[])
         //Input
         printf("> ");
         scanf("%c", &userInput);
+        fflush(stdin);
+        
         switch (userInput)
         {
             case 'j':   //Join a room
