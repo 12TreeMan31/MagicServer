@@ -17,7 +17,6 @@ void panic(const char *message) { perror((message)); exit(0); };
 void error(const char *message) { printf("%s\n", message); exit(0); };
 void warning(const char *message) { printf("%s\n", message); };
 
-
 //Gets the ip that the client is using th connect to server
 char* getHostInfo()
 {
@@ -42,33 +41,50 @@ void attemptConnection(int *clientSocket, struct sockaddr_in serverInfo)
     } while (connectionState == -1);
 }
 
-void initP2Pconnection()
+void initP2Pconnection(int *clientSocket, struct sockaddr_in serverInfo, char roomType, int port)
 {
+    char messageBuffer[2048];
+    char *clientInfo, *token;
+    int roomID;
+
+    //Asks to room id
+    printf("Room Name: ");
+    scanf("%i", &roomID);
     //Creates the response
-    scanf("Room ID: %i", &roomID);
-    ipInfo = getHostInfo();
+    clientInfo = getHostInfo();
     snprintf(messageBuffer, sizeof(messageBuffer),
-        "J-%s-%i-%i",ipInfo, port, 123);
+        "%c-%s-%i-%i", roomType, clientInfo, port, roomID);
 
     //Starts talking to the server to make the connection happen
-    write(clientSocket, messageBuffer, strlen(messageBuffer));
+    write(*clientSocket, messageBuffer, strlen(messageBuffer));
     printf("Sent connection request %s\n", messageBuffer);
     memset(messageBuffer, 0, sizeof(messageBuffer));
 
-    //Gets respanse back with another clients ip's and port's
-    read(clientSocket, messageBuffer, sizeof(messageBuffer));
+    //Gets respanse back with another clients ip and port
+    read(*clientSocket, messageBuffer, sizeof(messageBuffer));
     printf("Starting connection to client\n");
-    //Creates more buffers so message can be parsed with regex
-    strcpy(tempBuffer, messageBuffer);
-    regexec(&readMessageIP, messageBuffer, 0, NULL, 0);
-    regexec(&readMessagePort, tempBuffer, 0, NULL, 0);
-    printf("Port: %s\n", tempBuffer);
-    printf("IP: %s\n", messageBuffer);
-    //Rebinds the active socket other client
-    serverInfo.sin_port = htons(atoi(tempBuffer));
-    inet_aton(messageBuffer, &serverInfo.sin_addr);
+
+    //Parses the message and modifys the server infomation to point to other client 
+    
+    //Private
+    //IP
+    token = strtok(messageBuffer, "-");
+    inet_aton(token, &serverInfo.sin_addr);
+    printf("IP: %s\n", token);
+    //Port
+    token = strtok(NULL, "-");
+    serverInfo.sin_port = htons(atoi(token));
+    printf("Port: %s\n", token);
+
+    //Public
+    token = strtok(NULL, "-");
+    
+    token = strtok(NULL, "-");
+
     //Trys to connect to the other client
-    connect(clientSocket, (struct sockaddr*)&serverInfo, sizeof(serverInfo));
+    printf("Waiting on client...\n");
+    attemptConnection(clientSocket, serverInfo);
+    printf("Connected to client!\n");
 }
 
 
@@ -101,91 +117,37 @@ int main(int argc, char *argv[])
         panic("Could not configure socket"); 
     }
 
+    //Connect to server
     printf("Looking for server...\n");
-
     attemptConnection(&clientSocket, serverInfo);
-
     printf("Server found!\n");
 
     char messageBuffer[2048];
-    char userInput, *ipInfo;
-    int roomID;
-
-    regex_t readMessageIP, readMessagePort;
-    regcomp(&readMessageIP, ":.*:", 0);
-    regcomp(&readMessagePort, "|.*|", 0);
+    char userInput;
 
     bool running = true;
     while (running) 
     {
         //Clears buffers
         memset(messageBuffer, 0, sizeof(messageBuffer));
-        //
-        char tempBuffer[1024];
+
+        //Input
         printf("> ");
         scanf("%c", &userInput);
         switch (userInput)
         {
             case 'j':   //Join a room
-                //Creates the response
-                scanf("Room ID: %i", &roomID);
-                ipInfo = getHostInfo();
-                snprintf(messageBuffer, sizeof(messageBuffer),
-                    "J-%s-%i-%i",ipInfo, port, 123);
-
-                //Starts talking to the server to make the connection happen
-                write(clientSocket, messageBuffer, strlen(messageBuffer));
-                printf("Sent connection request %s\n", messageBuffer);
-                memset(messageBuffer, 0, sizeof(messageBuffer));
-
-                //Gets respanse back with another clients ip's and port's
-                read(clientSocket, messageBuffer, sizeof(messageBuffer));
-                printf("Starting connection to client\n");
-                //Creates more buffers so message can be parsed with regex
-                strcpy(tempBuffer, messageBuffer);
-                regexec(&readMessageIP, messageBuffer, 0, NULL, 0);
-                regexec(&readMessagePort, tempBuffer, 0, NULL, 0);
-                printf("Port: %s\n", tempBuffer);
-                printf("IP: %s\n", messageBuffer);
-                //Rebinds the active socket other client
-                serverInfo.sin_port = htons(atoi(tempBuffer));
-                inet_aton(messageBuffer, &serverInfo.sin_addr);
-                //Trys to connect to the other client
-                connect(clientSocket, (struct sockaddr*)&serverInfo, sizeof(serverInfo));
+                initP2Pconnection(&clientSocket, serverInfo, 'J', port);
                 break;
             case 'n':   //Create a new room
-                //Creates the response
-                scanf("Room ID: %i", &roomID);
-                ipInfo = getHostInfo();
-                snprintf(messageBuffer, sizeof(messageBuffer),
-                    "N-%s-%i-%i",ipInfo, port, 123);
-
-                //Starts talking to the server to make the connection happen
-                write(clientSocket, messageBuffer, strlen(messageBuffer));
-                printf("Sent connection request %s\n", messageBuffer);
-                memset(messageBuffer, 0, sizeof(messageBuffer));
-
-                //Gets respanse back with another clients ip's and port's
-                read(clientSocket, messageBuffer, sizeof(messageBuffer));
-                printf("Starting connection to client\n");
-                //Creates more buffers so message can be parsed with regex
-                strcpy(tempBuffer, messageBuffer);
-                regexec(&readMessageIP, messageBuffer, 0, NULL, 0);
-                regexec(&readMessagePort, tempBuffer, 0, NULL, 0);
-                printf("Port: %s\n", tempBuffer);
-                printf("IP: %s\n", messageBuffer);
-                //Rebinds the active socket other client
-                serverInfo.sin_port = htons(atoi(tempBuffer));
-                inet_aton(messageBuffer, &serverInfo.sin_addr);
-                //Trys to connect to the other client
-                connect(clientSocket, (struct sockaddr*)&serverInfo, sizeof(serverInfo));
+                initP2Pconnection(&clientSocket, serverInfo, 'N', port);
                 break;
             case 'q':   //Quits
                 close(clientSocket);
                 shutdown(clientSocket, SHUT_RDWR);
                 break;
             default:
-                printf("%c", userInput);
+                printf("Not a command\n");
                 break;
         }
     }

@@ -18,6 +18,7 @@ void warning(const char *message) { printf("%s", message); };
 struct Client
 {
     int fd;
+    bool waiting;
 
     char *publicIp;
     int publicPort;
@@ -32,6 +33,7 @@ struct Room
     struct Client clientA;
     struct Client clientB;
 };
+
 
 int main(int argc, char *argv[])
 {
@@ -75,8 +77,8 @@ int main(int argc, char *argv[])
     listen(serverSocket, 1024);
     
     // Client info
-    struct sockaddr_in clientInfo;
-    socklen_t clientInfo_size = sizeof(clientInfo);
+    struct sockaddr_in clientInfo_global;
+    socklen_t clientInfo_size = sizeof(clientInfo_global);
 
     int sd, sd_max;
     fd_set sdArray;
@@ -84,13 +86,18 @@ int main(int argc, char *argv[])
     int newClient;
     //int totalClients = 0;
     int maxClients = 1024;
-    int activeClients[maxClients];
-    memset(&activeClients, 0, sizeof(activeClients));
+
+    struct Client *activeClients = calloc(maxClients, sizeof(struct Client));
+
+    //int activeClients[maxClients];
+    //memset(activeClients, 0, sizeof(activeClients));
 
     //Some more client stuff
-    struct Room **clientList = (struct Room **)calloc(100, sizeof(struct Room));
-    int roomListIndex = 0;
-    int yesRoom = 0;
+    int roomIndex = 0;
+    int maxRoom = 100;
+    struct Room *hotel = (struct Room *)calloc(maxRoom, sizeof(struct Room));
+
+    char *buffer = (char*)calloc(9999, sizeof(char));
 
     bool running = true;
     while (running)
@@ -106,8 +113,8 @@ int main(int argc, char *argv[])
         for (int i = 0; i < maxClients; i++)
         {
             // Takes a socket from active clients 
-            sd = activeClients[i];  
- 
+            sd = activeClients[i].fd;  
+
             // If socket exsists add it to sdArray
             if(sd > 0)
             {
@@ -132,21 +139,30 @@ int main(int argc, char *argv[])
         if (FD_ISSET(serverSocket, &sdArray))
         {
             //Adds a new client
-            if ((newClient = accept(serverSocket, (struct sockaddr*)&clientInfo, &clientInfo_size)) == -1)
+            if ((newClient = accept(serverSocket, (struct sockaddr*)&clientInfo_global, &clientInfo_size)) == -1)
             {
                 printf("Error trying to accept\n");
                 exit(-1);
             }
- 
-            //Announces the new connection
-            printf("New connection at %s:%i\n", inet_ntoa(clientInfo.sin_addr) , ntohs(clientInfo.sin_port));
 
-            //Adds new connection to sdArray
+            //Struct for a client
+            struct Client *clientInfo_local = malloc(sizeof(*clientInfo_local));
+            clientInfo_local->fd = newClient;
+            clientInfo_local->waiting = false;
+            clientInfo_local->publicIp = inet_ntoa(clientInfo_global.sin_addr);
+            clientInfo_local->publicPort = ntohs(clientInfo_global.sin_port);   
+
+            //Announces the new connection
+            printf("New connection at %s:%i\n", clientInfo_local->publicIp, clientInfo_local->publicPort);
+
+            //Adds new client into to activeClients
             for (int i = 0; i < maxClients; i++)
             {
-                if (activeClients[i] == 0)
+                if (activeClients[i].fd == 0)
                 {
-                    activeClients[i] = newClient;
+                    activeClients[i] = *clientInfo_local;
+                    printf("%i\n", activeClients[i].fd);
+                    free(clientInfo_local);
                     break;
                 }
             }
@@ -155,85 +171,93 @@ int main(int argc, char *argv[])
         //Old client request
         for (int i = 0; i < maxClients; i++)
         {
-            sd = activeClients[i];
-
-            //Checks to see if client is still connected 
-            if (FD_ISSET(sd, &sdArray))
+            //Disconnects client if needed  
+            if (FD_ISSET(activeClients[i].fd, &sdArray))
             {
-                //Disconnects client
-                getpeername(sd , (struct sockaddr*)&clientInfo , &clientInfo_size);
-                printf("Client at %s:%i disconnected\n", inet_ntoa(clientInfo.sin_addr) , ntohs(clientInfo.sin_port));
+                //Announces disconnection
+                printf("Client at %s:%i disconnected\n", activeClients[i].publicIp, activeClients[i].publicPort);
                 
-                close(sd);  
-                activeClients[i] = 0; 
+                close(activeClients[i].fd);  
+                activeClients[i].fd = 0; 
             }
-            else
+            //If there is still a client
+            else if (activeClients[i].fd > 0 && !activeClients[i].waiting)
             {
-                //Manage it
-                if ((sd = activeClients[i]) > 0)
+                printf("%i\n", activeClients[i].fd);
+                memset(buffer, 0, 9999);
+
+                read(activeClients[i].fd, buffer, 9999);
+                printf("%s\n", buffer);
+                    
+                //Parse the request
+                char* token = strtok(buffer, "-");
+                printf("%s\n", token);
+                //Checks room
+                switch (*token)
                 {
-                    //Read response from client
-                    //char buffer[1024], buffer2[1024], buffer3[1024], buffer4[1024];
-                    char *buffer;
-                    buffer = (char*)calloc(9999, sizeof(char));
+                    case 'N':   //Create a room
+                        struct Room *newHotelRoom = malloc(sizeof(*newHotelRoom));
+                        activeClients[i].waiting = true;
+                        newHotelRoom->clientA = activeClients[i];
 
-                    read(sd, buffer, 9999);
-                    printf("%s\n", buffer);
-                    
-                    //Parse the request
-                    char* token = strtok(buffer, "-");
-                    
-                    //Checks room
-                    switch (*token)
-                    {
-                        case 'J':
-                            struct Room *someNewRoom = (struct Room*)malloc(sizeof(struct Room));
-                            clientList[roomListIndex] = someNewRoom;
+                        //Ip
+                        token = strtok(NULL, "-");
+                        newHotelRoom->clientA.privateIp = token;
+                        //Port
+                        token = strtok(NULL, "-");
+                        newHotelRoom->clientA.privatePort = atoi(token);
+                        //Gives the room a id
+                        token = strtok(NULL, "-");                       
+                        newHotelRoom->roomID = atoi(token);
 
-                            //FD
-                            clientList[roomListIndex]->clientA.fd = sd;
+                        hotel[roomIndex] = *newHotelRoom;
+                        printf("Created room!\n");
+                        break;
+                    case 'J':
+                        printf("Attempting to join room\n");
+                        //Ip
+                        token = strtok(NULL, "-");
+                        activeClients[i].privateIp = token;
+                        //Port
+                        token = strtok(NULL, "-");
+                        activeClients[i].privatePort = atoi(token);
 
-                            //Ip
-                            token = strtok(NULL, "-");
-                            clientList[roomListIndex]->clientA.privateIp = token;
+                        //Finds the room
+                        struct Room activeRoom;
+                        token = strtok(NULL, "-");
+                        for (int j = 0; j < maxRoom; j++)
+                        {
+                            if (hotel[j].roomID == atoi(token))
+                            {
+                                printf("Room Found!\n");
+                                hotel[j].clientB = activeClients[i];
+                                activeRoom = hotel[j];
+                                break;
+                            }
+                        }
+                        //When found send a message to client A and B
+                        printf("Tango Started\n");
 
-                            //Port
-                            token = strtok(NULL, "-");
-                            clientList[roomListIndex]->clientA.privatePort = atoi(token); 
-                            printf("Created room!\n");
-                            break;
-                        case 'N':
-                            yesRoom = 1;
-                            clientList[roomListIndex]->clientB.fd = sd;
+                        //Client A
+                        snprintf(buffer, 9999, "%s-%i-%s-%i", activeRoom.clientB.privateIp, activeRoom.clientB.privatePort, 
+                            activeRoom.clientB.publicIp, activeRoom.clientB.publicPort);
+                        //Sends message
+                        write(activeRoom.clientB.fd, buffer, 9999);
+                        memset(buffer, 0, 9999);
+                        
+                        printf("Sent message to client A\n");
 
-                            //Ip
-                            token = strtok(NULL, "-");
-                            clientList[roomListIndex]->clientB.privateIp = token;
+                        //Client B
+                        snprintf(buffer, 9999, "%s-%i-%s-%i", activeRoom.clientA.privateIp, activeRoom.clientA.privatePort, 
+                            activeRoom.clientA.publicIp, activeRoom.clientA.publicPort);
+                        //Sends message
+                        write(activeRoom.clientB.fd, buffer, 9999);
+                        printf("Sent message to client B\n");
 
-                            //Port
-                            token = strtok(NULL, "-");
-                            clientList[roomListIndex]->clientB.privatePort = atoi(token); 
-
-                            snprintf(buffer, 9999, "%s, %i", clientList[roomListIndex]->clientA.privateIp, clientList[roomListIndex]->clientA.privatePort);
-                            //Send messages to client B
-                            write(sd, buffer, 9999);
-                            break;
-                    }
-
-                    //Stores fd and request in a struct
-                    if (yesRoom == 1 && clientList[roomListIndex]->clientA.fd == sd)
-                    {
-                            snprintf(buffer, 9999, "%s, %i", clientList[roomListIndex]->clientB.privateIp, clientList[roomListIndex]->clientB.privatePort);
-                            //Send messages to client B
-                            write(sd, buffer, 9999); 
-                    }
-                    //Does stuff if client wants to join or create a room
-
-                    //Does nothing untill there are 2 clients which it then sends the endpoints
-
-                    //End communication
-                    free(buffer);
+                        printf("Tango Ended\n");
+                        break;
                 }
+                //End communication
             }
         }     
     }
