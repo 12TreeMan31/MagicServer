@@ -183,7 +183,6 @@ int main(int argc, char *argv[])
             //If there is still a client
             else if (activeClients[i].fd > 0 && !activeClients[i].waiting)
             {
-                printf("%i\n", activeClients[i].fd);
                 memset(buffer, 0, 9999);
 
                 read(activeClients[i].fd, buffer, 9999);
@@ -196,26 +195,26 @@ int main(int argc, char *argv[])
                 switch (*token)
                 {
                     case 'N':   //Create a room
-                        struct Room *newHotelRoom; 
-                        //Why Debain?
-                        goto Clean;
-                        Clean: ;
-
-                        newHotelRoom = malloc(sizeof(*newHotelRoom));
                         activeClients[i].waiting = true;
-                        newHotelRoom->clientA = activeClients[i];
-
                         //Ip
                         token = strtok(NULL, "-");
-                        newHotelRoom->clientA.privateIp = token;
+                        activeClients[i].privateIp = token;
+                        printf("%s\n", token);
                         //Port
                         token = strtok(NULL, "-");
-                        newHotelRoom->clientA.privatePort = atoi(token);
+                        activeClients[i].privatePort = atoi(token);
+                        
+                        //Creates the room
+                        struct Room *newHotelRoom = malloc(sizeof(*newHotelRoom));
+                        newHotelRoom->clientA = activeClients[i];
+                        printf("%s\n", newHotelRoom->clientA.privateIp);
                         //Gives the room a id
                         token = strtok(NULL, "-");                       
                         newHotelRoom->roomID = atoi(token);
 
+
                         hotel[roomIndex] = *newHotelRoom;
+
                         printf("Created room!\n");
                         break;
                     case 'J':
@@ -223,6 +222,7 @@ int main(int argc, char *argv[])
                         //Ip
                         token = strtok(NULL, "-");
                         activeClients[i].privateIp = token;
+                        printf("%s\n", token);
                         //Port
                         token = strtok(NULL, "-");
                         activeClients[i].privatePort = atoi(token);
@@ -240,6 +240,7 @@ int main(int argc, char *argv[])
                                 break;
                             }
                         }
+                        printf("%s\n", activeRoom.clientB.privateIp);
                         //When found send a message to client A and B
                         printf("Tango Started\n");
 
@@ -247,6 +248,7 @@ int main(int argc, char *argv[])
                         snprintf(buffer, 9999, "%s-%i-%s-%i", activeRoom.clientB.privateIp, activeRoom.clientB.privatePort, 
                             activeRoom.clientB.publicIp, activeRoom.clientB.publicPort);
                         //Sends message
+                        printf("%s\n", buffer);
                         write(activeRoom.clientA.fd, buffer, 9999);
                         memset(buffer, 0, 9999);
                         
@@ -255,6 +257,7 @@ int main(int argc, char *argv[])
                         //Client B
                         snprintf(buffer, 9999, "%s-%i-%s-%i", activeRoom.clientA.privateIp, activeRoom.clientA.privatePort, 
                             activeRoom.clientA.publicIp, activeRoom.clientA.publicPort);
+                        printf("%s\n", buffer);
                         //Sends message
                         write(activeRoom.clientB.fd, buffer, 9999);
                         printf("Sent message to client B\n");
