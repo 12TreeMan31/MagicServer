@@ -67,8 +67,8 @@ void argumentCheck(int argc, char *argv[])
                     {
                         case 'p':       //Ports
                             i++;
-                            short port = atoi(argv[i]);
-                            if (port < 1023) ERROR("Please enter a valid port");
+                            unsigned short port = atoi(argv[i]);
+                            if (port < 1023 || argv[i][0] == '-') ERROR("Please enter a valid port");
                             serverMain->serverInfo.sin_port = htons(port);
                             break;
                         
@@ -100,10 +100,26 @@ void argumentCheck(int argc, char *argv[])
 } 
 
 //Server 
-void serverMode()
+void serverStart()
 {
     serverMain->socket = socket(AF_INET, SOCK_STREAM, 0);
     serverMain->serverInfo.sin_family = AF_INET;
+
+    //Configures socket options 
+    int opt = true;  
+    if (setsockopt(serverMain->socket, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) == -1)
+    { 
+        PANIC("Could not configure socket"); 
+    }
+
+    // Binds serverInfo sin_addr
+    if (bind(serverMain->socket, (struct sockaddr*)&serverMain->serverInfo, sizeof(serverMain->serverInfo)) == -1)
+    {
+        PANIC("Failed to bind socket");
+    }
+
+    listen(serverMain->socket, 1024);
+    printf("Server Started!\n");
 }
 
 //Client
