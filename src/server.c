@@ -34,7 +34,6 @@ struct Room
     struct Client clientB;
 };
 
-
 int main(int argc, char *argv[])
 {
     //Args

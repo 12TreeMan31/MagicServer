@@ -1,7 +1,7 @@
 SRC_DIR := src/
 OBJ_DIR := obj
 BIN_DIR := .
-
+#-lev
 server_old: server_old.o
 	gcc -g server_old.o -o server_old.debug
 server_old.o: $(SRC_DIR)
@@ -14,7 +14,7 @@ client.o: $(SRC_DIR)
 
 new_client: new_client.o
 	gcc -g new_client.o -o new_client.debug
-new_client.o: $(SRC_DIR)
+new_client.o: $(SRC_DIR)new_client.c
 	gcc -g -Wall -c $(SRC_DIR)new_client.c
 
 

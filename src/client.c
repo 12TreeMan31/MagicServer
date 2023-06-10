@@ -17,7 +17,7 @@ void panic(const char *message) { perror((message)); exit(0); };
 void error(const char *message) { printf("%s\n", message); exit(0); };
 void warning(const char *message) { printf("%s\n", message); };
 
-//Gets the ip that the client is using th connect to server
+//Gets the ip that the client is using to connect to server
 char* getHostInfo()
 {
     //Gets host infomation
