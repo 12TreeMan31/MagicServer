@@ -3,13 +3,15 @@
 #include <string.h>
 #include <stdbool.h>
 #include <sys/socket.h>
-#include <sys/select.h>
+#include <sys/ioctl.h>
+#include <poll.h>
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <netinet/ip.h> /* superset of previous */
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <errno.h>
 #include <regex.h>
 
@@ -30,7 +32,7 @@ struct thisClient
 //Info about the other users
 struct Peer
 {
-    int fd;
+    int *fd;
     char *username;
     int publicKey;
     bool waiting;
@@ -47,7 +49,11 @@ struct Server
     //0 - Client, 1 - Server, 2 - MixedMode
     int serverMode;
 
-    struct Peer *activePeers;
+    struct Peer *activePeers[1024];
+
+    //For poll
+    struct pollfd fds[1024];
+    int nfds;
 };
 
 struct Party
@@ -57,9 +63,6 @@ struct Party
 
     struct Peer *partyMembers;
 };
-
-//static struct Server *serverMain;
-
 
 void argument_check(int argc, char *argv[], struct Server *connectionInfo)
 {
@@ -93,6 +96,40 @@ void argument_check(int argc, char *argv[], struct Server *connectionInfo)
             break;
         }
     }
+}
+
+void *start_server(void *someArgs)
+{
+    struct Server *connectionInfo = (struct Server *)someArgs;
+    int *serverSocket = &connectionInfo->socket;
+
+    /*memset(connectionInfo->fds, 0, sizeof(connectionInfo->fds));
+    connectionInfo->nfds = 1;*/
+
+    // Binds serverInfo sin_addr
+    if (bind(*serverSocket, (struct sockaddr*)&connectionInfo->serverLocation, sizeof(connectionInfo->serverLocation)) == -1)
+    {
+        close(*serverSocket);
+        PANIC("Error trying to bind socket\n");
+    }
+
+    //Listen
+    if (listen(*serverSocket, 1024) == -1)
+    {
+        close(*serverSocket);
+        PANIC("Error trying to listen\n");
+    }
+
+    socklen_t clientInfo_size = sizeof(connectionInfo->activePeers[0]->public);
+    if (accept(*serverSocket, (struct sockaddr*)&connectionInfo->activePeers[0]->public, &clientInfo_size) == -1)
+    {
+        printf("Error trying to accept\n");
+        exit(-1);
+    }
+
+    printf("New Connection\n"); 
+    //printf("New connection at %s:%i\n", connectionInfo->activePeers[0]->public.sin_addr, connectionInfo->activePeers[0]->public.sin_port);
+    return NULL;
 }
 
 //Parses a request into an array - TODO: Make them HTTP request
@@ -168,12 +205,25 @@ void start_p2p_connection(char *buffer, char *partyType, struct Server *connecti
     //privateIP - privatePort - publicIP - publicPort
     parse_request(buffer, parsedMessage);
 
-    //ADD THIS
+    //Puts the data in the right spot
+    //Private IP
+    inet_aton(parsedMessage[0], &connectionInfo->activePeers[0]->private.sin_addr);
+    //Public IP
+    inet_aton(parsedMessage[2], &connectionInfo->activePeers[0]->public.sin_addr);
+    //Private Port
+    connectionInfo->activePeers[0]->private.sin_port = htons(atoi(parsedMessage[1]));
+    //Public Port
+    connectionInfo->activePeers[0]->public.sin_port = htons(atoi(parsedMessage[3]));
 
-
-    //For right now look at local ip
+    //Finally atempt connection to friend
+    //For right now look at private ip
     printf("Attempting connection to peer...\n");
-    attempt_connection(&connectionInfo->socket, connectionInfo->serverLocation);
+    
+    pthread_t thread_id;
+    pthread_create(&thread_id, NULL, start_server, (void *)connectionInfo);
+ 
+    sleep(1);
+    attempt_connection(&connectionInfo->socket, connectionInfo->activePeers[0]->private);
     printf("Success!\n");
 }
 
@@ -196,13 +246,23 @@ int main(int argc, char *argv[])
 
     //Creates socket
     connectionInfo->socket = socket(AF_INET, SOCK_STREAM, 0);
+    connectionInfo->serverLocation.sin_family = AF_INET;
 
-    //Configures socket options 
-    int opt = true;  
-    if (setsockopt(connectionInfo->socket, SOL_SOCKET, SO_REUSEADDR, (char *)&opt, sizeof(opt)) == -1)
-    { 
-        PANIC("Could not configure socket"); 
+    //Configures socket
+    int on = 1;
+    if (setsockopt(connectionInfo->socket, SOL_SOCKET, SO_REUSEADDR, (char *)&on, sizeof(on)) == -1)
+    {
+        close(connectionInfo->socket);
+        PANIC("Could not configure port\n");     
+    } 
+
+    //Sets the server socket to be nonblocking 
+    if (ioctl(connectionInfo->socket, FIONBIO, (char *)&on))
+    {
+        close(connectionInfo->socket);
+        PANIC("ioctl\n");
     }
+
 
     printf("Connecting to server at %s:%i\n", inet_ntoa(connectionInfo->serverLocation.sin_addr), ntohs(connectionInfo->serverLocation.sin_port));
 
@@ -238,7 +298,6 @@ int main(int argc, char *argv[])
                 break;
             case 'q':   //Quits
                 close(connectionInfo->socket);
-                shutdown(connectionInfo->socket, SHUT_RDWR);
                 break;
             default:
                 printf("Not a command\n");
