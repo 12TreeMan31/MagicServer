@@ -21,12 +21,11 @@
 
 #define DEFAULT_USERNAME "Anonymous"
 #define DEFAULT_SERVER_PORT 7168
-#define CLIENT_PORT 7169
 
+// Used if the threads need to told to each other
 static pthread_mutex_t fdChange = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t sigIO = PTHREAD_COND_INITIALIZER;
-static char *ioBuffer;
-static bool debugMode = false;
+//static char *ioBuffer;
 
 // Everything is a peer and it hold important infomation about the session
 struct peer
@@ -45,10 +44,12 @@ struct server
 {
 	int inboundSock;
 	int outboundSock;
-	// int totalActiveConnections;
-	struct peer atvPeers[MAX_CONNECTIONS];
 
-	struct sockaddr_in info;
+	/*Index 0 is always used for server infomation
+	  The reason for this for consistancy because the epoll struct fds
+	  expects that index 0 is the server infomation and that is something
+	  out of my control - TODO merge fds with atvPeers*/
+	struct peer atvPeers[MAX_CONNECTIONS];
 };
 
 int compress_array(struct peer *fds[], int length)
@@ -86,26 +87,6 @@ int connection_close(int *fd)
 	return 0;
 }
 
-// Accepts ALL new connections at fd
-/*int connection_receive(int fd, struct sockaddr_in *clientInfo)
-{
-	socklen_t clientInfo_size = sizeof(*clientInfo);
-	int newClient;
-	do
-	{
-		newClient = accept(fd, (struct sockaddr *)clientInfo, &clientInfo_size);
-		if (newClient == -1) break;
-
-		//Announces the new connection
-		printf("New connection at %s:%i\n", inet_ntoa(clientInfo->sin_addr) , ntohs(clientInfo->sin_port));
-
-	} while (newClient != -1);
-
-	return 0;
-}*/
-
-//
-
 int data_parse(char *message, char *destination[], short dataBits, char *delimiter)
 {
 	destination[0] = strtok(message, delimiter);
@@ -132,7 +113,7 @@ int str_format(char *buffer, size_t buffLength, char *data[], int dataCount)
 
 int data_read(int *fd, char *buffer)
 {
-	switch (recv(*fd, buffer, BUFFER_SIZE, 0))
+	switch (read(*fd, buffer, BUFFER_SIZE))
 	{
 	case 0:
 		// Left Empty on purpose - Client Disconnects
@@ -140,14 +121,13 @@ int data_read(int *fd, char *buffer)
 	case -1:
 		perror("Failed to get message: ");
 		break;
-
 	default:
 		// Left Empty on purpose - Got message - TODO Send signal that everything was good
 		return 0;
 	}
 
 	// If message failed to read
-	// connection_close(fd);
+	connection_close(fd);
 	return -1;
 }
 
@@ -171,19 +151,25 @@ void *inbound_io(void *master_origin)
 {
 	struct server *master = (struct server *)master_origin;
 
-	ioBuffer = (char *)calloc(BUFFER_SIZE, sizeof(char));
+	char *ioBuffer = (char *)calloc(BUFFER_SIZE, sizeof(char));
 	socklen_t peerInfoSize = sizeof(struct sockaddr_in);
 
-	struct pollfd fds[MAX_CONNECTIONS] = {0};
+	struct pollfd fds[MAX_CONNECTIONS];// = {0};
+	memset(fds, 0, MAX_CONNECTIONS);
 	fds[0].fd = master->inboundSock;
 	fds[0].events = POLLIN;
 
+	printf("%i", master->inboundSock);
+	printf("%s", fds[0].fd);
+
 	int nfds = 1, currentnfds = 1;
-	int peerfd;
+	int peerfd, activeEvents;
 
 	while (true)
 	{
-		if (poll(fds, nfds, 100000) == -1)
+		activeEvents = poll(fds, nfds, -1);
+		printf("%i", nfds);
+		if (activeEvents == -1)
 		{
 			printf("Failed to poll\n");
 			// Some error
@@ -220,12 +206,8 @@ void *inbound_io(void *master_origin)
 			{
 				memset(ioBuffer, 0, BUFFER_SIZE);
 
-				if (data_read(&fds[i].fd, ioBuffer) == -1)
-				{
-					connection_close(&fds[i].fd);
-					break;
-				}
-				pthread_cond_broadcast(&sigIO);
+				data_read(&fds[i].fd, ioBuffer);
+
 				printf("%s", ioBuffer);
 			}
 		}
@@ -237,14 +219,23 @@ void *inbound_io(void *master_origin)
 
 int main(int argc, const char *argv[])
 {
+	// This struct holds all of the connection infomation that the server needs
 	struct server master;
-	master.inboundSock = socket(AF_INET, SOCK_STREAM, 0);
-	master.info.sin_family = AF_INET;
-	inet_aton("127.0.0.1", &master.info.sin_addr);
 
-	// Default Port
+	// This sets up the server socket for inbound connections
+	master.inboundSock = socket(AF_INET, SOCK_STREAM, 0);
+
+	if (master.inboundSock == -1)
+	{
+		printf("Failed to create socket");
+		exit(-1);
+	}
+	master.atvPeers[0].fd = &master.inboundSock;
+	master.atvPeers[0].public.sin_family = AF_INET;
+	inet_aton("127.0.0.1", &master.atvPeers[0].public.sin_addr);
+
+	// Argument Handler
 	unsigned short serverPort = DEFAULT_SERVER_PORT;
-	unsigned short clientPort = DEFAULT_SERVER_PORT;
 	char username[21] = DEFAULT_USERNAME;
 
 	for (int i = 1; i < argc; i++)
@@ -261,15 +252,7 @@ int main(int argc, const char *argv[])
 				{
 					// Some error
 				}
-				master.info.sin_port = htons(serverPort);
-				break;
-			case 'c': // The port the client will listen on (REMOVE THIS)
-				i++;
-				clientPort = atoi(argv[i]);
-				if (clientPort < 1023 || argv[i][0] == '-')
-				{
-					// Some error
-				}
+				master.atvPeers[0].public.sin_port = htons(serverPort);
 				break;
 			case 'u': // Username
 				i++;
@@ -283,6 +266,8 @@ int main(int argc, const char *argv[])
 			break;
 		}
 	}
+
+	/*THE ERROR STARTS HERE*/
 
 	printf("%s\n", username);
 
@@ -302,7 +287,7 @@ int main(int argc, const char *argv[])
 	}
 
 	// Binds serverInfo sin_addr
-	if (bind(master.inboundSock, (struct sockaddr *)&master.info, sizeof(master.info)) != 0)
+	if (bind(master.inboundSock, (struct sockaddr *)&master.atvPeers[0].public, sizeof(master.atvPeers[0].public)) != 0)
 	{
 		printf("Error trying to bind socket\n");
 		exit(-1);
@@ -315,9 +300,13 @@ int main(int argc, const char *argv[])
 		exit(-1);
 	}
 
+	printf("%d", master.inboundSock);
+
 	// Make a signal be sent when thread is ready
 	pthread_t ioThread_id;
 	pthread_create(&ioThread_id, NULL, inbound_io, &master);
+
+	sleep(1);
 
 	printf("Server Started! Accepting inbound connections\n");
 
@@ -350,7 +339,11 @@ int main(int argc, const char *argv[])
 		}
 		else
 		{
-			send(userSock, buffer, BUFFER_SIZE, 0);
+			printf("E");
+			write(userSock, buffer, BUFFER_SIZE);
+			memset(buffer, 0, BUFFER_SIZE);
+			read(userSock, buffer, BUFFER_SIZE);
+			printf("%s", buffer);
 		}
 	}
 
