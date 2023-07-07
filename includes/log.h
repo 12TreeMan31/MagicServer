@@ -1,6 +1,10 @@
 #ifndef LOG_H
 #define LOG_H
 
+#ifndef LOG_STREAM
+#define LOG_STREAM stdout
+#endif
+
 #include <stdio.h>
 #include <stdarg.h>
 #include <string.h>
@@ -9,22 +13,22 @@
 #include <pthread.h>
 #include <sys/stat.h> /* mkdir */
 
-enum logSigs
-{
-    LOG_ERROR,
-    LOG_WARN,
-    LOG_INFO,
-    LOG_DEBUG
-};
+#define LOG_ERROR "ERROR"
+#define LOG_DEBUG "Debug"
+#define LOG_WARN "Warn"
+#define LOG_INFO "Info"
 
-int log_init(int mode);
+void log_init();
 
 // LOG_ERROR, LOG_WARN, LOG_INFO, LOG_DEBUG
-int log_log(enum logSigs sig, const char *fmt, ...);
+void log_log(FILE *stream, char *sig, char *message);
 
-#define log_error(message, ...) log_log(LOG_ERROR, message, ##__VA_ARGS__)
-#define log_warn(message, ...) log_log(LOG_WARN, message, ##__VA_ARGS__)
-#define log_info(message, ...) log_log(LOG_INFO, message, ##__VA_ARGS__)
-#define log_debug(message, ...) log_log(LOG_DEBUG, message, ##__VA_ARGS__)
+#define LOG(sig, ...)                   \
+    do                                  \
+    {                                   \
+        char mm[100];                   \
+        snprintf(mm, 100, __VA_ARGS__); \
+        log_log(LOG_STREAM, sig, mm);   \
+    } while (0)
 
 #endif
