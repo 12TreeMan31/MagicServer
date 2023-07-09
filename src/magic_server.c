@@ -23,9 +23,10 @@
 #define DEFAULT_SERVER_PORT 7168
 
 // Used if the threads need to told to each other
-// static pthread_mutex_t fdChange = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t newPeer = PTHREAD_MUTEX_INITIALIZER;
 // static pthread_cond_t sigIO = PTHREAD_COND_INITIALIZER;
 // static char *ioBuffer;
+static socklen_t peerInfoSize = sizeof(struct sockaddr_in);
 
 // Everything is a peer and it hold important infomation about the session
 struct peer
@@ -42,13 +43,18 @@ struct peer
 // This is shared between all threads
 struct server
 {
-	int outboundSock;
-
 	/*Index 0 is always used for server infomation
-	  The reason for this for consistancy because the epoll struct fds
-	  expects that index 0 is the server infomation and that is something
-	  out of my control - TODO merge fds with atvPeers*/
+	  The reason for this for consistancy because the pollfd struct fds
+	  expects that index 0 is the server infomation (Maybe?) and that is something
+	  out of my control - If possible I would be very happy merging the two*/
 	struct peer atvPeers[MAX_CONNECTIONS];
+	struct pollfd fds[MAX_CONNECTIONS];
+	/* The total number of inbound and outbound file descripters */
+	int nfds;
+
+	/* Placeholder for now */
+	int privateKey;
+	int outboundSocket;
 };
 
 int compress_array(struct peer *fds[], int length)
@@ -86,7 +92,7 @@ int connection_close(int *fd)
 	return 0;
 }
 
-int data_parse(char *message, char *destination[], short dataBits, char *delimiter)
+int str_parse(char *message, char *destination[], short dataBits, char *delimiter)
 {
 	destination[0] = strtok(message, delimiter);
 	for (short i = 1; i < dataBits; i++)
@@ -142,6 +148,24 @@ int data_write(char *message, int *fd)
 	return 0;
 }
 
+int add_peer(int *socket, struct peer *peerInfo, struct pollfd *fds, char *buffer)
+{
+	// pthread_mutex_lock(&newPeer);
+	
+	fds->fd = *socket;
+	fds->events = POLLIN;
+
+	peerInfo->fd = &fds->fd;
+
+	// pthread_mutex_unlock(&newPeer);
+
+	//Do some HTTP stuff to get the username 
+	data_read(socket, buffer);
+
+	strcpy(peerInfo->username, buffer);
+	return 0;
+}
+
 //
 
 // Polls for events
@@ -150,60 +174,55 @@ void *inbound_io(void *master_origin)
 	struct server *master = (struct server *)master_origin;
 
 	char *ioBuffer = (char *)calloc(BUFFER_SIZE, sizeof(char));
-	socklen_t peerInfoSize = sizeof(struct sockaddr_in);
+	// socklen_t peerInfoSize = sizeof(struct sockaddr_in);
 
-	struct pollfd fds[MAX_CONNECTIONS];
-	fds[0].fd = *master->atvPeers[0].fd;
-	fds[0].events = POLLIN;
-
-	LOG(LOG_DEBUG, "%i", *master->atvPeers[0].fd);
-
-	int nfds = 1, currentnfds;
+	int *nfds = &master->nfds;
+	int currentnfds;
 	int peerfd;
 
 	LOG(LOG_INFO, "Server Started! Accepting inbound connections");
 
 	while (true)
 	{
-		if (poll(fds, nfds, -1) == -1)
+		if (poll(master->fds, *nfds, -1) == -1)
 		{
 			printf("Failed to poll\n");
 			// Some error
 		}
 
-		currentnfds = nfds;
+		currentnfds = *nfds;
 		for (int i = 0; i < currentnfds; i++)
 		{
 			// New Connection
-			if (fds[i].fd == *master->atvPeers[0].fd)
+			if (master->fds[i].fd == *master->atvPeers[0].fd)
 			{
 				do
 				{
-					peerfd = accept(fds[0].fd, (struct sockaddr *)&master->atvPeers[nfds].public, &peerInfoSize);
+					peerfd = accept(master->fds[0].fd, (struct sockaddr *)&master->atvPeers[*nfds].public, &peerInfoSize);
 					// If no new connection
 					if (peerfd == -1)
-					{
 						break;
-					}
 					// Announces the new connection
-					LOG(LOG_INFO, "New connection at %s:%i", inet_ntoa(master->atvPeers[nfds].public.sin_addr), ntohs(master->atvPeers[nfds].public.sin_port));
+					LOG(LOG_INFO, "New connection at %s:%i", inet_ntoa(master->atvPeers[*nfds].public.sin_addr), ntohs(master->atvPeers[*nfds].public.sin_port));
 
 					// Adds client info
-					fds[nfds].fd = peerfd;
-					fds[nfds].events = POLLIN;
-					master->atvPeers[nfds].fd = &fds[nfds].fd;
-
-					nfds++;
+					pthread_mutex_lock(&newPeer);
+					master->fds[*nfds].fd = peerfd;
+					master->fds[*nfds].events = POLLIN;
+					master->atvPeers[*nfds].fd = &master->fds[*nfds].fd;
+					data_read(&peerfd, master->atvPeers[*nfds].username);
+					*nfds = *nfds + 1;
+					pthread_mutex_unlock(&newPeer);
 				} while (peerfd != -1);
 			}
 			// Message from somewhere
-			else if ((fds[i].fd > 0) && (fds[i].revents == POLLIN))
+			else if ((master->fds[i].fd > 0) && (master->fds[i].revents == POLLIN))
 			{
 				memset(ioBuffer, 0, BUFFER_SIZE);
 
-				data_read(&fds[i].fd, ioBuffer);
+				data_read(&master->fds[i].fd, ioBuffer);
 
-				LOG(LOG_INFO, "%s", ioBuffer);
+				LOG(LOG_INFO, "<%s> %s", master->atvPeers[i].username, ioBuffer);
 			}
 		}
 	}
@@ -214,8 +233,6 @@ void *inbound_io(void *master_origin)
 
 int main(int argc, const char *argv[])
 {
-	log_init();
-
 	// Argument Handler
 	unsigned short serverPort = DEFAULT_SERVER_PORT;
 	char username[21] = DEFAULT_USERNAME;
@@ -235,6 +252,9 @@ int main(int argc, const char *argv[])
 					// Some error
 				}
 				break;
+			case 'd': // Debuging
+				log_init();
+				break;
 			case 'u': // Username
 				i++;
 				snprintf(username, 21, "%s", argv[i]);
@@ -249,11 +269,10 @@ int main(int argc, const char *argv[])
 	}
 
 	LOG(LOG_INFO, "Starting server on 127.0.0.1:%i", serverPort);
+	LOG(LOG_INFO, "Username: %s", username);
 
-	// This struct holds all of the connection infomation that the server needs
+	// Connection info
 	struct server master;
-
-	// This sets up the server socket for inbound connections
 
 	int inboundSock = socket(AF_INET, SOCK_STREAM, 0);
 	if (inboundSock == -1)
@@ -262,12 +281,10 @@ int main(int argc, const char *argv[])
 		exit(-1);
 	}
 
-	master.atvPeers[0].fd = &inboundSock;
 	master.atvPeers[0].public.sin_family = AF_INET;
+	// Start fazing this out and instead adding the hex directly 
 	inet_aton("127.0.0.1", &master.atvPeers[0].public.sin_addr);
 	master.atvPeers[0].public.sin_port = htons(serverPort);
-
-	LOG(LOG_INFO, "Username - %s", username);
 
 	// Lets socket to accept multiple connections and be reused
 	int on = true;
@@ -298,28 +315,24 @@ int main(int argc, const char *argv[])
 		exit(-1);
 	}
 
-	// Make a signal be sent when thread is ready
+	master.atvPeers[0].fd = &inboundSock;
+	strcpy(master.atvPeers[0].username, username);
+	master.fds[0].fd = *master.atvPeers[0].fd;
+	master.fds[0].events = POLLIN;
+
+	master.nfds = 1;
+
+	// Makes the thread that handles all inbound communication
 	pthread_t ioThread_id;
 	pthread_create(&ioThread_id, NULL, inbound_io, &master);
 
-	// printf("Server Started! Accepting inbound connections\n");
-
+	// Outbound connection
 	char *buffer = (char *)calloc(BUFFER_SIZE, sizeof(char));
 	char *tempBuffer[2];
 
-	int userSock = socket(AF_INET, SOCK_STREAM, 0);
-	struct sockaddr_in outboundContection;
-
-	/*if (setsockopt(userSock, SOL_SOCKET, SO_REUSEADDR, (char *)&on, sizeof(on)) == -1)
-	{
-		printf("Error trying to set opt\n");
-		exit(-1);
-	}
-	if (ioctl(userSock, FIONBIO, (char *)&on))
-	{
-		printf("ioctl\n");
-		exit(-1);
-	}*/
+	int peerfd;
+	struct peer newConnect;
+	int *nfds = &master.nfds;
 
 	while (true)
 	{
@@ -328,26 +341,42 @@ int main(int argc, const char *argv[])
 
 		if (buffer[0] == '/')
 		{
-			buffer++;
-			data_parse(buffer, tempBuffer, 2, ":");
 			LOG(LOG_INFO, "Attempting to connect to client...");
-			outboundContection.sin_family = AF_INET;
-			outboundContection.sin_port = htons(atoi(tempBuffer[1]));
-			inet_aton(tempBuffer[0], &outboundContection.sin_addr);
+			if (str_parse(++buffer, tempBuffer, 2, ":") == -1)
+			{
+				LOG(LOG_ERROR, "Not a valid network address");
+				break;
+			}
+			//Info for new peer
+			peerfd = socket(AF_INET, SOCK_STREAM, 0);
+			newConnect.public.sin_family = AF_INET;
+			newConnect.public.sin_port = htons(atoi(tempBuffer[1]));
+			inet_aton(tempBuffer[0], &newConnect.public.sin_addr);
+			//Connects
 			int connectionState;
 			do
 			{
-				connectionState = connect(userSock, (struct sockaddr *)&outboundContection, sizeof(outboundContection));
+				connectionState = connect(peerfd, (struct sockaddr *)&newConnect.public, sizeof(newConnect.public));
 				if (connectionState == -1)
 					sleep(1);
 			} while (connectionState == -1);
 
-			LOG(LOG_INFO, "Connected to peer at %s:%i", inet_ntoa(outboundContection.sin_addr), ntohs(outboundContection.sin_port));
-			buffer--;
+			send(peerfd, master.atvPeers[0].username, 21, 0);
+
+			//Syncs info with the rest of program
+			pthread_mutex_lock(&newPeer);
+			master.fds[*nfds].fd = peerfd;
+			master.fds[*nfds].events = POLLIN;
+
+			master.atvPeers[*nfds].fd = &master.fds[*nfds].fd;
+			*nfds = *nfds + 1;
+			pthread_mutex_unlock(&newPeer);
+
+			LOG(LOG_INFO, "Connected to peer at %s:%i", inet_ntoa(newConnect.public.sin_addr), ntohs(newConnect.public.sin_port));
 		}
 		else
 		{
-			send(userSock, buffer, BUFFER_SIZE, 0);
+			send(peerfd, buffer, strlen(buffer) - 1, 0);
 		}
 	}
 }
